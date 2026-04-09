@@ -328,6 +328,96 @@ export const companies: Company[] = [
     logo: "L",
     industry: "IT Services",
   },
+  {
+    id: "mphasis",
+    name: "Mphasis",
+    type: "service",
+    description:
+      "IT services company specializing in cloud and cognitive services, owned by Blackstone.",
+    logo: "M",
+    industry: "IT Services",
+  },
+  {
+    id: "persistent",
+    name: "Persistent Systems",
+    type: "service",
+    description:
+      "Digital engineering and enterprise modernization company based in Pune.",
+    logo: "P",
+    industry: "IT Services",
+  },
+  {
+    id: "hexaware",
+    name: "Hexaware Technologies",
+    type: "service",
+    description:
+      "IT services and BPS company focused on automation and cloud transformation.",
+    logo: "H",
+    industry: "IT Services",
+  },
+  {
+    id: "coforge",
+    name: "Coforge",
+    type: "service",
+    description:
+      "Global IT solutions company (formerly NIIT Technologies) focused on travel, insurance, and banking.",
+    logo: "C",
+    industry: "IT Services",
+  },
+  {
+    id: "zensar",
+    name: "Zensar Technologies",
+    type: "service",
+    description:
+      "Digital solutions and technology services company, part of RPG Group.",
+    logo: "Z",
+    industry: "IT Services",
+  },
+  {
+    id: "virtusa",
+    name: "Virtusa",
+    type: "service",
+    description:
+      "Global IT consulting and outsourcing company specializing in digital transformation.",
+    logo: "V",
+    industry: "IT Consulting",
+  },
+  {
+    id: "nttdata",
+    name: "NTT Data",
+    type: "service",
+    description:
+      "Global IT services provider and part of NTT Group, serving enterprise clients worldwide.",
+    logo: "N",
+    industry: "IT Services",
+  },
+  {
+    id: "dxc",
+    name: "DXC Technology",
+    type: "service",
+    description:
+      "Global IT services company formed from the merger of CSC and HP Enterprise Services.",
+    logo: "D",
+    industry: "IT Services",
+  },
+  {
+    id: "ust",
+    name: "UST",
+    type: "service",
+    description:
+      "Digital transformation solutions company providing IT services and consulting globally.",
+    logo: "U",
+    industry: "IT Services",
+  },
+  {
+    id: "ltts",
+    name: "L&T Technology Services",
+    type: "service",
+    description:
+      "Engineering R&D and technology services company, part of Larsen & Toubro Group.",
+    logo: "L",
+    industry: "Engineering Services",
+  },
 ];
 
 export function getCompaniesByType(type: "product" | "service"): Company[] {
