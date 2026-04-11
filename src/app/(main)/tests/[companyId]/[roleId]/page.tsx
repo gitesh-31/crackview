@@ -1,8 +1,6 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { getTestsByCompanyAndRole } from "@/data/tests";
-import { getCompanyById } from "@/data/companies";
-import { getRoleById } from "@/data/roles";
+import { getOrCreateTest } from "@/lib/test-generator";
 import TestRunner from "@/components/TestRunner";
 
 export default async function TestPage({
@@ -11,18 +9,16 @@ export default async function TestPage({
   params: Promise<{ companyId: string; roleId: string }>;
 }) {
   const { companyId, roleId } = await params;
-  const testsForRole = getTestsByCompanyAndRole(companyId, roleId);
-  const company = getCompanyById(companyId);
-  const role = getRoleById(roleId);
+  const test = getOrCreateTest(companyId, roleId);
 
-  if (testsForRole.length === 0 || !company || !role) {
+  if (!test) {
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-16 text-center">
         <h1 className="text-2xl font-bold text-white mb-4">
-          No tests available
+          Test not found
         </h1>
         <p className="text-muted mb-6">
-          Tests for this company and role combination are coming soon.
+          We couldn't find a test for this company and role combination.
         </p>
         <Link href="/tests" className="text-primary hover:text-primary-hover">
           Browse all tests
@@ -30,8 +26,6 @@ export default async function TestPage({
       </div>
     );
   }
-
-  const test = testsForRole[0];
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
