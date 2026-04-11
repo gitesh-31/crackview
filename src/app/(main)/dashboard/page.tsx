@@ -9,6 +9,9 @@ import {
   Trophy,
   ClipboardList,
   TrendingUp,
+  Mic,
+  Swords,
+  Sparkles,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { getCompletedCount, getTestResults } from "@/lib/progress";
@@ -151,6 +154,59 @@ export default function DashboardPage() {
               </div>
               <div className="flex items-center gap-2 text-accent font-medium">
                 Explore Companies
+                <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition" />
+              </div>
+            </div>
+          </div>
+        </Link>
+      </div>
+
+      {/* Featured Modes */}
+      <h2 className="text-xl font-semibold text-white mb-6 flex items-center gap-2">
+        <Sparkles className="w-5 h-5 text-accent" />
+        Practice Modes
+      </h2>
+      <div className="grid md:grid-cols-2 gap-5 mb-12">
+        <Link href="/virtual-interview" className="group">
+          <div className="relative bg-card border border-border rounded-2xl p-7 hover:border-primary/50 transition-all overflow-hidden h-full">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-primary/15 to-transparent rounded-bl-full" />
+            <div className="relative">
+              <div className="w-14 h-14 bg-primary/10 rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 transition">
+                <Mic className="w-7 h-7 text-primary" />
+              </div>
+              <h3 className="text-xl font-bold text-white mb-2">
+                Virtual Interview Experience
+              </h3>
+              <p className="text-muted text-sm mb-5 leading-relaxed">
+                Simulate a real interview round. Get timed thinking and answering
+                windows on company-specific questions, then self-rate your
+                performance.
+              </p>
+              <div className="flex items-center gap-2 text-primary font-medium text-sm">
+                Start Practicing
+                <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition" />
+              </div>
+            </div>
+          </div>
+        </Link>
+
+        <Link href="/challenge" className="group">
+          <div className="relative bg-card border border-border rounded-2xl p-7 hover:border-accent/50 transition-all overflow-hidden h-full">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-accent/15 to-transparent rounded-bl-full" />
+            <div className="relative">
+              <div className="w-14 h-14 bg-accent/10 rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 transition">
+                <Swords className="w-7 h-7 text-accent" />
+              </div>
+              <h3 className="text-xl font-bold text-white mb-2">
+                Challenge a Friend
+              </h3>
+              <p className="text-muted text-sm mb-5 leading-relaxed">
+                QuizUp-style rapid-fire battles on System Design, DSA, and Basic
+                CS. Create a code, share with a friend, and see who scores
+                higher.
+              </p>
+              <div className="flex items-center gap-2 text-accent font-medium text-sm">
+                Battle Now
                 <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition" />
               </div>
             </div>
