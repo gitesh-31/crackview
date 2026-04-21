@@ -1,4 +1,5 @@
 import Navbar from "@/components/layout/Navbar";
+import HelpAssistant from "@/components/HelpAssistant";
 
 export default function MainLayout({
   children,
@@ -15,6 +16,7 @@ export default function MainLayout({
           <p className="mt-1 text-[#64748b]/60">CrackView - Interview Preparation Management System</p>
         </div>
       </footer>
+      <HelpAssistant />
     </>
   );
 }

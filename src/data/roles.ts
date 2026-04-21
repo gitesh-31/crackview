@@ -92,6 +92,27 @@ export const roles: Role[] = [
     description:
       "Build and deploy AI/ML models, LLM applications, and intelligent systems at scale.",
   },
+  {
+    id: "business-analyst",
+    name: "Business Analyst",
+    icon: "BarChart3",
+    description:
+      "Bridge business needs and technology through requirements gathering, analysis, and process improvement.",
+  },
+  {
+    id: "data-analyst",
+    name: "Data Analyst",
+    icon: "LineChart",
+    description:
+      "Collect, clean, and analyze data to drive business insights through SQL, Excel, and BI tools.",
+  },
+  {
+    id: "cloud-engineer",
+    name: "Cloud Engineer",
+    icon: "CloudCog",
+    description:
+      "Build, deploy, and maintain cloud-native applications and services across AWS, Azure, and GCP.",
+  },
 ];
 
 export function getRoleById(id: string): Role | undefined {

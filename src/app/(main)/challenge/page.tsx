@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Swords,
   Clock,
@@ -15,7 +15,11 @@ import {
   Network,
   Cpu,
   Sparkles,
+  Loader2,
+  Copy,
 } from "lucide-react";
+import type { RealtimeChannel } from "@supabase/supabase-js";
+import { createClient } from "@/lib/supabase";
 import {
   getQuizQuestionsByCategory,
   quizCategories,
@@ -23,8 +27,14 @@ import {
   type QuizQuestion,
 } from "@/data/quizzes";
 
-type Phase = "select" | "playing" | "summary";
+type Phase =
+  | "select"
+  | "lobby_host"
+  | "lobby_guest"
+  | "playing"
+  | "summary";
 type Mode = "solo" | "challenge";
+
 type ScoreEntry = {
   challengeId: string;
   player: string;
@@ -35,6 +45,12 @@ type ScoreEntry = {
   completedAt: string;
 };
 
+type PresenceMeta = {
+  name: string;
+  role: "host" | "guest";
+  category: QuizCategory | "Mixed";
+};
+
 const SECONDS_PER_QUESTION = 15;
 const QUESTIONS_PER_GAME = 10;
 const STORAGE_KEY = "crackview_challenge_scores";
@@ -43,7 +59,7 @@ const categoryMeta: Record<
   QuizCategory | "Mixed",
   { icon: React.ComponentType<{ className?: string }>; color: string; desc: string }
 > = {
-  "DSA": {
+  DSA: {
     icon: Brain,
     color: "text-primary",
     desc: "Arrays, trees, graphs, sorting, complexity",
@@ -58,7 +74,7 @@ const categoryMeta: Record<
     color: "text-warning",
     desc: "OS, networks, DBMS, OOP fundamentals",
   },
-  "Mixed": {
+  Mixed: {
     icon: Sparkles,
     color: "text-success",
     desc: "All three categories blended",
@@ -102,6 +118,8 @@ export default function ChallengePage() {
   const [playerName, setPlayerName] = useState("You");
   const [challengeId, setChallengeId] = useState("");
   const [joinCode, setJoinCode] = useState("");
+  const [joinError, setJoinError] = useState<string>("");
+  const [joining, setJoining] = useState(false);
 
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [currentIdx, setCurrentIdx] = useState(0);
@@ -110,6 +128,16 @@ export default function ChallengePage() {
   const [startedAt, setStartedAt] = useState<number>(0);
   const [savedThisRun, setSavedThisRun] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  // Lobby state
+  const [lobbyPlayers, setLobbyPlayers] = useState<PresenceMeta[]>([]);
+  const [hostCategory, setHostCategory] = useState<QuizCategory | "Mixed" | null>(
+    null
+  );
+  const [liveScores, setLiveScores] = useState<ScoreEntry[]>([]);
+
+  const channelRef = useRef<RealtimeChannel | null>(null);
+  const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null);
 
   // Initialize player name from localStorage
   useEffect(() => {
@@ -124,9 +152,33 @@ export default function ChallengePage() {
     }
   };
 
+  const ensureClient = useCallback(() => {
+    if (!supabaseRef.current) {
+      supabaseRef.current = createClient();
+    }
+    return supabaseRef.current;
+  }, []);
+
+  const cleanupChannel = useCallback(async () => {
+    const ch = channelRef.current;
+    if (ch) {
+      try {
+        await ch.unsubscribe();
+      } catch {
+        // ignore
+      }
+      try {
+        supabaseRef.current?.removeChannel(ch);
+      } catch {
+        // ignore
+      }
+      channelRef.current = null;
+    }
+  }, []);
+
   const startGame = useCallback(
-    (id: string, cat: QuizCategory | "Mixed") => {
-      const seed = seedFromString(`${id}|${cat}`);
+    (id: string, cat: QuizCategory | "Mixed", overrideSeed?: number) => {
+      const seed = overrideSeed ?? seedFromString(`${id}|${cat}`);
       const picks = getQuizQuestionsByCategory(cat, QUESTIONS_PER_GAME, seed);
       setQuestions(picks);
       setAnswers(new Array(picks.length).fill(null));
@@ -134,6 +186,7 @@ export default function ChallengePage() {
       setSecondsLeft(SECONDS_PER_QUESTION);
       setStartedAt(Date.now());
       setSavedThisRun(false);
+      setLiveScores([]);
       setPhase("playing");
     },
     []
@@ -146,19 +199,178 @@ export default function ChallengePage() {
     startGame(id, category);
   };
 
-  const handleCreateChallenge = () => {
+  // ---------- Challenge lobby (host) ----------
+  const openHostLobby = useCallback(
+    async (
+      id: string,
+      cat: QuizCategory | "Mixed",
+      hostName: string
+    ) => {
+      const supabase = ensureClient();
+      await cleanupChannel();
+
+      const channel = supabase.channel(`challenge:${id}`, {
+        config: {
+          broadcast: { self: true },
+          presence: { key: `${hostName}-host-${Date.now()}` },
+        },
+      });
+
+      channel.on("presence", { event: "sync" }, () => {
+        const state = channel.presenceState<PresenceMeta>();
+        const all: PresenceMeta[] = [];
+        for (const list of Object.values(state)) {
+          for (const p of list) {
+            all.push({
+              name: p.name,
+              role: p.role,
+              category: p.category,
+            });
+          }
+        }
+        setLobbyPlayers(all);
+      });
+
+      channel.on("broadcast", { event: "start" }, ({ payload }) => {
+        const p = payload as {
+          seed: number;
+          category: QuizCategory | "Mixed";
+        };
+        setCategory(p.category);
+        startGame(id, p.category, p.seed);
+      });
+
+      channel.on("broadcast", { event: "score" }, ({ payload }) => {
+        const entry = payload as ScoreEntry;
+        setLiveScores((prev) => {
+          const filtered = prev.filter(
+            (s) => s.player !== entry.player || s.completedAt !== entry.completedAt
+          );
+          return [...filtered, entry];
+        });
+      });
+
+      await channel.subscribe(async (status) => {
+        if (status === "SUBSCRIBED") {
+          await channel.track({
+            name: hostName || "Host",
+            role: "host",
+            category: cat,
+          } satisfies PresenceMeta);
+        }
+      });
+
+      channelRef.current = channel;
+    },
+    [cleanupChannel, ensureClient, startGame]
+  );
+
+  const handleCreateChallenge = async () => {
     const id = generateChallengeId();
     setChallengeId(id);
     setMode("challenge");
-    startGame(id, category);
+    setLobbyPlayers([]);
+    setHostCategory(category);
+    setPhase("lobby_host");
+    await openHostLobby(id, category, playerName || "Host");
   };
 
-  const handleJoinChallenge = () => {
+  // ---------- Challenge lobby (guest) ----------
+  const openGuestLobby = useCallback(
+    async (id: string, guestName: string) => {
+      const supabase = ensureClient();
+      await cleanupChannel();
+
+      const channel = supabase.channel(`challenge:${id}`, {
+        config: {
+          broadcast: { self: true },
+          presence: { key: `${guestName}-guest-${Date.now()}` },
+        },
+      });
+
+      channel.on("presence", { event: "sync" }, () => {
+        const state = channel.presenceState<PresenceMeta>();
+        const all: PresenceMeta[] = [];
+        let host: PresenceMeta | null = null;
+        for (const list of Object.values(state)) {
+          for (const p of list) {
+            const meta: PresenceMeta = {
+              name: p.name,
+              role: p.role,
+              category: p.category,
+            };
+            all.push(meta);
+            if (meta.role === "host") host = meta;
+          }
+        }
+        setLobbyPlayers(all);
+        if (host) {
+          setHostCategory(host.category);
+          setCategory(host.category);
+        }
+      });
+
+      channel.on("broadcast", { event: "start" }, ({ payload }) => {
+        const p = payload as {
+          seed: number;
+          category: QuizCategory | "Mixed";
+        };
+        setCategory(p.category);
+        startGame(id, p.category, p.seed);
+      });
+
+      channel.on("broadcast", { event: "score" }, ({ payload }) => {
+        const entry = payload as ScoreEntry;
+        setLiveScores((prev) => {
+          const filtered = prev.filter(
+            (s) => s.player !== entry.player || s.completedAt !== entry.completedAt
+          );
+          return [...filtered, entry];
+        });
+      });
+
+      await channel.subscribe(async (status) => {
+        if (status === "SUBSCRIBED") {
+          await channel.track({
+            name: guestName || "Guest",
+            role: "guest",
+            category: "DSA", // placeholder; host category is authoritative
+          } satisfies PresenceMeta);
+        }
+      });
+
+      channelRef.current = channel;
+    },
+    [cleanupChannel, ensureClient, startGame]
+  );
+
+  const handleJoinChallenge = async () => {
     const id = joinCode.trim().toUpperCase();
     if (!id) return;
+    setJoinError("");
+    setJoining(true);
     setChallengeId(id);
     setMode("challenge");
-    startGame(id, category);
+    setLobbyPlayers([]);
+    setHostCategory(null);
+    try {
+      await openGuestLobby(id, playerName || "Guest");
+      setPhase("lobby_guest");
+    } catch {
+      setJoinError("Could not connect to the challenge. Please retry.");
+    } finally {
+      setJoining(false);
+    }
+  };
+
+  const handleHostStart = async () => {
+    if (!channelRef.current) return;
+    const seed = seedFromString(`${challengeId}|${category}|${Date.now()}`);
+    await channelRef.current.send({
+      type: "broadcast",
+      event: "start",
+      payload: { seed, category },
+    });
   };
 
   const handleAnswer = useCallback(
@@ -168,7 +380,6 @@ export default function ChallengePage() {
       setAnswers(updated);
 
       if (currentIdx + 1 >= questions.length) {
-        // finish
         setPhase("summary");
       } else {
         setCurrentIdx((i) => i + 1);
@@ -197,7 +408,7 @@ export default function ChallengePage() {
     }, 0);
   }, [answers, questions]);
 
-  // Save the score when summary first opens
+  // Save the score when summary first opens + broadcast to lobby
   useEffect(() => {
     if (phase !== "summary" || savedThisRun || questions.length === 0) return;
     const entry: ScoreEntry = {
@@ -211,18 +422,45 @@ export default function ChallengePage() {
     };
     saveScore(entry);
     setSavedThisRun(true);
-  }, [phase, savedThisRun, questions.length, score, challengeId, playerName, startedAt, category]);
+    if (mode === "challenge" && channelRef.current) {
+      channelRef.current.send({
+        type: "broadcast",
+        event: "score",
+        payload: entry,
+      });
+    }
+  }, [
+    phase,
+    savedThisRun,
+    questions.length,
+    score,
+    challengeId,
+    playerName,
+    startedAt,
+    category,
+    mode,
+  ]);
 
   const challengeScores = useMemo(() => {
     if (mode !== "challenge") return [];
-    return loadScores()
-      .filter((s) => s.challengeId === challengeId)
-      .sort((a, b) => b.score - a.score || a.timeMs - b.timeMs);
-    // Note: re-evaluates only when phase/savedThisRun change
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, challengeId, savedThisRun]);
+    const local = loadScores().filter((s) => s.challengeId === challengeId);
+    const merged: ScoreEntry[] = [...local];
+    for (const live of liveScores) {
+      if (
+        !merged.some(
+          (s) => s.player === live.player && s.completedAt === live.completedAt
+        )
+      ) {
+        merged.push(live);
+      }
+    }
+    return merged.sort(
+      (a, b) => b.score - a.score || a.timeMs - b.timeMs
+    );
+  }, [mode, challengeId, liveScores, savedThisRun]);
 
-  const resetAll = () => {
+  const resetAll = useCallback(async () => {
+    await cleanupChannel();
     setPhase("select");
     setQuestions([]);
     setAnswers([]);
@@ -230,11 +468,22 @@ export default function ChallengePage() {
     setChallengeId("");
     setJoinCode("");
     setSavedThisRun(false);
-  };
+    setLobbyPlayers([]);
+    setHostCategory(null);
+    setLiveScores([]);
+    setJoinError("");
+  }, [cleanupChannel]);
+
+  // Clean up channel on unmount
+  useEffect(() => {
+    return () => {
+      cleanupChannel();
+    };
+  }, [cleanupChannel]);
 
   const copyChallengeLink = async () => {
     if (typeof window === "undefined") return;
-    const link = `${window.location.origin}/challenge?code=${challengeId}&cat=${encodeURIComponent(category)}`;
+    const link = `${window.location.origin}/challenge?code=${challengeId}`;
     try {
       await navigator.clipboard.writeText(link);
       setCopied(true);
@@ -244,15 +493,24 @@ export default function ChallengePage() {
     }
   };
 
-  // Auto-load challenge from URL on first render
+  const copyCode = async () => {
+    if (typeof window === "undefined") return;
+    try {
+      await navigator.clipboard.writeText(challengeId);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // ignore
+    }
+  };
+
+  // Auto-fill join code from URL on first render
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     const code = params.get("code");
-    const cat = params.get("cat") as QuizCategory | "Mixed" | null;
-    if (code && cat && [...quizCategories, "Mixed"].includes(cat)) {
-      setJoinCode(code);
-      setCategory(cat);
+    if (code) {
+      setJoinCode(code.toUpperCase());
     }
   }, []);
 
@@ -269,9 +527,9 @@ export default function ChallengePage() {
             Challenge a Friend
           </h1>
           <p className="text-muted text-base max-w-2xl mx-auto leading-relaxed">
-            QuizUp-style rapid-fire battles. Pick a topic, race against the clock,
-            and share your challenge code so a friend can play the same questions.
-            Highest score wins.
+            QuizUp-style rapid-fire battles. Pick a topic, get a code, share it
+            with a friend, and start together — same questions, same timer,
+            highest score wins.
           </p>
         </div>
 
@@ -352,8 +610,8 @@ export default function ChallengePage() {
             Join a Friend&apos;s Challenge
           </h2>
           <p className="text-sm text-muted mb-4">
-            Enter the 6-character code your friend shared. You&apos;ll play the same
-            questions so you can compare scores.
+            Enter the 6-character code your friend shared. You&apos;ll both start
+            together on the same questions when the host presses Start.
           </p>
           <div className="flex flex-col sm:flex-row gap-3">
             <input
@@ -366,13 +624,226 @@ export default function ChallengePage() {
             />
             <button
               onClick={handleJoinChallenge}
-              disabled={joinCode.trim().length === 0}
+              disabled={joinCode.trim().length === 0 || joining}
               className="px-6 py-3 bg-accent hover:bg-accent/80 text-background font-semibold rounded-xl transition disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
-              Join
-              <ArrowRight className="w-4 h-4" />
+              {joining ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Connecting
+                </>
+              ) : (
+                <>
+                  Join
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
             </button>
           </div>
+          {joinError && (
+            <p className="mt-3 text-sm text-danger">{joinError}</p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ----- LOBBY (host) -----
+  if (phase === "lobby_host") {
+    const guests = lobbyPlayers.filter((p) => p.role === "guest");
+    return (
+      <div className="max-w-2xl mx-auto px-4 sm:px-6 py-10">
+        <div className="bg-card border border-border rounded-2xl p-6 sm:p-8">
+          <div className="text-center mb-6">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-medium mb-3">
+              <Swords className="w-3.5 h-3.5" />
+              Hosting
+            </div>
+            <h2 className="text-2xl font-bold text-white mb-1">
+              Share your challenge code
+            </h2>
+            <p className="text-muted text-sm">
+              Send this to your friend. The game starts when you press Start —
+              everyone plays the same questions, same timer, at the same time.
+            </p>
+          </div>
+
+          <div className="bg-background border border-border rounded-xl p-5 mb-5 text-center">
+            <p className="text-xs text-muted mb-2 uppercase tracking-wider">
+              Challenge Code
+            </p>
+            <p className="text-4xl font-mono font-bold text-accent tracking-widest mb-4">
+              {challengeId}
+            </p>
+            <div className="flex items-center justify-center gap-2">
+              <button
+                onClick={copyCode}
+                className="px-4 py-2 bg-card border border-border hover:bg-card-hover text-white rounded-xl transition flex items-center gap-2 text-sm"
+              >
+                <Copy className="w-4 h-4" />
+                Copy Code
+              </button>
+              <button
+                onClick={copyChallengeLink}
+                className="px-4 py-2 bg-accent/10 hover:bg-accent/20 border border-accent/30 text-accent rounded-xl transition flex items-center gap-2 text-sm"
+              >
+                {copied ? (
+                  <>
+                    <CheckCircle2 className="w-4 h-4" />
+                    Copied!
+                  </>
+                ) : (
+                  <>
+                    <Share2 className="w-4 h-4" />
+                    Copy Link
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-background border border-border rounded-xl p-5 mb-5">
+            <p className="text-xs text-muted uppercase tracking-wider mb-2">
+              Category (locked)
+            </p>
+            <p className="text-white font-medium">{category}</p>
+            <p className="text-xs text-muted mt-1">
+              {categoryMeta[category].desc}
+            </p>
+          </div>
+
+          <div className="mb-5">
+            <p className="text-sm font-medium text-white mb-3 flex items-center gap-2">
+              <Users className="w-4 h-4 text-accent" />
+              Players in lobby ({lobbyPlayers.length})
+            </p>
+            <div className="space-y-2">
+              {lobbyPlayers.map((p, i) => (
+                <div
+                  key={`${p.name}-${p.role}-${i}`}
+                  className="flex items-center justify-between px-4 py-2.5 bg-background border border-border rounded-xl"
+                >
+                  <span className="text-white text-sm">{p.name}</span>
+                  <span
+                    className={`text-xs px-2 py-0.5 rounded-full ${
+                      p.role === "host"
+                        ? "bg-primary/10 text-primary border border-primary/20"
+                        : "bg-accent/10 text-accent border border-accent/20"
+                    }`}
+                  >
+                    {p.role}
+                  </span>
+                </div>
+              ))}
+              {guests.length === 0 && (
+                <div className="px-4 py-3 bg-background border border-dashed border-border rounded-xl text-center">
+                  <Loader2 className="w-4 h-4 animate-spin text-muted mx-auto mb-1" />
+                  <p className="text-xs text-muted">
+                    Waiting for friends to join...
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <button
+            onClick={handleHostStart}
+            disabled={guests.length === 0}
+            className="w-full px-6 py-3.5 bg-primary hover:bg-primary-hover disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold rounded-xl transition flex items-center justify-center gap-2 mb-2"
+          >
+            <Swords className="w-5 h-5" />
+            Start Challenge for everyone
+          </button>
+          <button
+            onClick={resetAll}
+            className="w-full px-6 py-2.5 bg-card border border-border hover:bg-card-hover text-white rounded-xl transition text-sm"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ----- LOBBY (guest) -----
+  if (phase === "lobby_guest") {
+    return (
+      <div className="max-w-2xl mx-auto px-4 sm:px-6 py-10">
+        <div className="bg-card border border-border rounded-2xl p-6 sm:p-8">
+          <div className="text-center mb-6">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent/10 border border-accent/20 text-accent text-xs font-medium mb-3">
+              <Users className="w-3.5 h-3.5" />
+              Joined as guest
+            </div>
+            <h2 className="text-2xl font-bold text-white mb-1">
+              Waiting for the host to start
+            </h2>
+            <p className="text-muted text-sm">
+              You&apos;ll begin at the exact moment the host starts the
+              challenge. Same questions, same timer.
+            </p>
+          </div>
+
+          <div className="bg-background border border-border rounded-xl p-5 mb-5 text-center">
+            <p className="text-xs text-muted mb-2 uppercase tracking-wider">
+              Challenge Code
+            </p>
+            <p className="text-3xl font-mono font-bold text-accent tracking-widest">
+              {challengeId}
+            </p>
+          </div>
+
+          <div className="bg-background border border-border rounded-xl p-5 mb-5">
+            <p className="text-xs text-muted uppercase tracking-wider mb-2">
+              Category
+            </p>
+            <p className="text-white font-medium">
+              {hostCategory ?? "Waiting for host..."}
+            </p>
+            {hostCategory && (
+              <p className="text-xs text-muted mt-1">
+                {categoryMeta[hostCategory].desc}
+              </p>
+            )}
+          </div>
+
+          <div className="mb-5">
+            <p className="text-sm font-medium text-white mb-3 flex items-center gap-2">
+              <Users className="w-4 h-4 text-accent" />
+              Players in lobby ({lobbyPlayers.length})
+            </p>
+            <div className="space-y-2">
+              {lobbyPlayers.map((p, i) => (
+                <div
+                  key={`${p.name}-${p.role}-${i}`}
+                  className="flex items-center justify-between px-4 py-2.5 bg-background border border-border rounded-xl"
+                >
+                  <span className="text-white text-sm">{p.name}</span>
+                  <span
+                    className={`text-xs px-2 py-0.5 rounded-full ${
+                      p.role === "host"
+                        ? "bg-primary/10 text-primary border border-primary/20"
+                        : "bg-accent/10 text-accent border border-accent/20"
+                    }`}
+                  >
+                    {p.role}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex items-center justify-center gap-2 mb-4 text-muted text-sm">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Waiting for host to press Start...
+          </div>
+
+          <button
+            onClick={resetAll}
+            className="w-full px-6 py-2.5 bg-card border border-border hover:bg-card-hover text-white rounded-xl transition text-sm"
+          >
+            Leave Lobby
+          </button>
         </div>
       </div>
     );
@@ -463,36 +934,6 @@ export default function ChallengePage() {
         <p className="text-muted mb-6">
           {percentage}% in {totalSec}s
         </p>
-
-        {mode === "challenge" && (
-          <div className="bg-background border border-border rounded-xl p-5 mb-6">
-            <p className="text-xs text-muted mb-2 uppercase tracking-wider">
-              Challenge Code
-            </p>
-            <p className="text-3xl font-mono font-bold text-accent tracking-widest mb-4">
-              {challengeId}
-            </p>
-            <button
-              onClick={copyChallengeLink}
-              className="px-5 py-2.5 bg-accent/10 hover:bg-accent/20 border border-accent/30 text-accent rounded-xl transition flex items-center gap-2 mx-auto"
-            >
-              {copied ? (
-                <>
-                  <CheckCircle2 className="w-4 h-4" />
-                  Copied!
-                </>
-              ) : (
-                <>
-                  <Share2 className="w-4 h-4" />
-                  Copy Challenge Link
-                </>
-              )}
-            </button>
-            <p className="text-xs text-muted mt-3">
-              Share this link or code so your friend plays the exact same questions.
-            </p>
-          </div>
-        )}
 
         <div className="flex items-center justify-center gap-3">
           <button
