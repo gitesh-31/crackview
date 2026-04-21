@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { getCompletedCount, getTestResults } from "@/lib/progress";
+import StreakCard from "@/components/StreakCard";
 
 export default function DashboardPage() {
   const [stats, setStats] = useState({ questions: 0, tests: 0, avgScore: 0 });
@@ -35,7 +36,7 @@ export default function DashboardPage() {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
       {/* Welcome */}
-      <div className="mb-10">
+      <div className="mb-8">
         <h1 className="text-3xl font-bold text-white mb-2">
           Welcome to CrackView
         </h1>
@@ -43,6 +44,9 @@ export default function DashboardPage() {
           Choose your path and start preparing for your dream job.
         </p>
       </div>
+
+      {/* Login Streak */}
+      <StreakCard />
 
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
