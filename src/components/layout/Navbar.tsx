@@ -14,6 +14,7 @@ import {
   LogOut,
   Mic,
   Swords,
+  Send,
 } from "lucide-react";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase";
@@ -24,6 +25,7 @@ const navLinks = [
   { href: "/virtual-interview", label: "Virtual Interview", icon: Mic },
   { href: "/challenge", label: "Challenge", icon: Swords },
   { href: "/learn", label: "Learn", icon: BookOpen },
+  { href: "/apply", label: "Apply", icon: Send },
   { href: "/leaderboard", label: "Leaderboard", icon: Trophy },
   { href: "/profile", label: "Profile", icon: User },
 ];

@@ -12,6 +12,7 @@ import {
   Mic,
   Swords,
   Sparkles,
+  Send,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { getCompletedCount, getTestResults } from "@/lib/progress";
@@ -220,7 +221,7 @@ export default function DashboardPage() {
 
       {/* Quick Links */}
       <h2 className="text-xl font-semibold text-white mb-6">Quick Actions</h2>
-      <div className="grid sm:grid-cols-3 gap-4">
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Link
           href="/tests"
           className="bg-card border border-border rounded-xl p-5 hover:border-primary/50 transition group"
@@ -239,6 +240,16 @@ export default function DashboardPage() {
           <h3 className="font-semibold text-white mb-1">Learn Concepts</h3>
           <p className="text-sm text-muted">
             DSA, System Design, DBMS, and more
+          </p>
+        </Link>
+        <Link
+          href="/apply"
+          className="bg-card border border-border rounded-xl p-5 hover:border-success/50 transition group"
+        >
+          <Send className="w-6 h-6 text-success mb-3" />
+          <h3 className="font-semibold text-white mb-1">Find Jobs</h3>
+          <p className="text-sm text-muted">
+            Curated job sites: remote, freelance, USD, and more
           </p>
         </Link>
         <Link
